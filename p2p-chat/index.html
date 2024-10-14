@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>P2P Chat with libp2p and Vite</title>
+  <style>
+    body { font-family: sans-serif; }
+    #messageList { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; }
+    #messageInput { width: 80%; }
+    textarea { width: 100%; }
+  </style>
+</head>
+<body>
+  <h1>P2P Chat with libp2p and Vite</h1>
+  <div>
+    <label>Your Peer ID:</label>
+    <input type="text" id="yourPeerId" readonly style="width: 100%;" />
+  </div>
+  <div>
+    <label>Your Addresses:</label>
+    <textarea id="yourAddresses" readonly rows="4"></textarea>
+  </div>
+  <div>
+    <label>Target Peer Multiaddress:</label>
+    <input type="text" id="targetPeerAddr" style="width: 100%;" placeholder="Paste peer address here" />
+    <button id="connectButton">Connect to Peer</button>
+  </div>
+  <div id="messageList"></div>
+  <div>
+    <input type="text" id="messageInput" placeholder="Type a message..." />
+    <button id="sendButton">Send Message</button>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
