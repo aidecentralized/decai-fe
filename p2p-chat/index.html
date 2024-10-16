@@ -2,37 +2,91 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>P2P Chat with libp2p and Vite</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="/favicon.ico" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>P2P Chat with PeerJS</title>
   <style>
-    /* If you prefer inline styles, you can place CSS here */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    textarea, input, button {
+      width: 100%;
+      margin-bottom: 10px;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    #chat {
+      border: 1px solid #ccc;
+      height: 300px;
+      padding: 10px;
+      overflow-y: scroll;
+      margin-bottom: 10px;
+      background-color: #f9f9f9;
+    }
+    .message {
+      margin: 5px 0;
+    }
+    .local {
+      text-align: right;
+      color: blue;
+    }
+    .remote {
+      text-align: left;
+      color: green;
+    }
+    .section {
+      margin-bottom: 30px;
+    }
+    .instructions {
+      background-color: #eef;
+      padding: 10px;
+      margin-bottom: 20px;
+      border: 1px solid #99c;
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="chat-window">
-      <div class="header">
-        <h2>P2P Chat</h2>
-      </div>
-      <div class="chat-area" id="messageList">
-        <!-- Messages will appear here -->
-      </div>
-      <div class="message-input">
-        <input type="text" id="messageInput" placeholder="Type a message..." />
-        <button id="sendButton">Send</button>
-      </div>
-    </div>
-    <div class="sidebar">
-      <h3>Your Information</h3>
-      <label>Your Peer ID:</label>
-      <input type="text" id="yourPeerId" readonly />
-      <label>Your Addresses:</label>
-      <textarea id="yourAddresses" readonly rows="4"></textarea>
-      <h3>Connect to Peer</h3>
-      <input type="text" id="targetPeerAddr" placeholder="Paste peer address here" />
-      <button id="connectButton">Connect</button>
-    </div>
+  <h1>P2P Chat Application with PeerJS</h1>
+
+  <div class="instructions">
+    <h2>Instructions</h2>
+    <ol>
+      <li><strong>Start the Application:</strong> Open the application in two separate browser windows or devices.</li>
+      <li><strong>Peer 1 (Host):</strong>
+        <ul>
+          <li>Your Peer ID is displayed below. Share this ID with Peer 2.</li>
+        </ul>
+      </li>
+      <li><strong>Peer 2 (Client):</strong>
+        <ul>
+          <li>Enter Peer 1's ID into the "Connect to Peer ID" field and click "Connect".</li>
+        </ul>
+      </li>
+      <li><strong>Chat:</strong> Once connected, both peers can send messages to each other.</li>
+    </ol>
+    <p><strong>Note:</strong> This setup uses PeerJS's default signaling server. For production use, consider hosting your own signaling server.</p>
   </div>
-  <script type="module" src="/src/main.js"></script>
+
+  <div class="section">
+    <h2>Your Peer ID</h2>
+    <textarea id="my-peer-id" readonly placeholder="Your Peer ID will appear here"></textarea>
+    <button id="copy-id">Copy My Peer ID</button>
+  </div>
+
+  <div class="section">
+    <h2>Connect to a Peer</h2>
+    <input type="text" id="peer-id-input" placeholder="Enter Peer ID to connect" />
+    <button id="connect-peer">Connect</button>
+  </div>
+
+  <div class="section">
+    <h2>Chat</h2>
+    <div id="chat"></div>
+    <input type="text" id="message" placeholder="Type your message here..." />
+    <button id="send">Send</button>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>

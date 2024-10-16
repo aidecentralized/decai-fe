@@ -1,111 +1,140 @@
-import { createLibp2p } from 'libp2p';
-import { webRTCStar } from '@libp2p/webrtc-star';
-import { noise } from '@libp2p/noise';
-import { mplex } from '@libp2p/mplex';
-import { fromString, toString } from 'uint8arrays';
+// main.js
+import Peer from 'peerjs';
 
-let node; // Store the libp2p node
-let connectedStream; // Store the connected stream
+// Elements
+const myPeerIdTextarea = document.getElementById('my-peer-id');
+const copyIdButton = document.getElementById('copy-id');
+const peerIdInput = document.getElementById('peer-id-input');
+const connectButton = document.getElementById('connect-peer');
+const chatDiv = document.getElementById('chat');
+const messageInput = document.getElementById('message');
+const sendButton = document.getElementById('send');
 
-// Ensure the code runs after the DOM has loaded
-window.onload = async function () {
-  const messageList = document.getElementById('messageList');
-  const messageInput = document.getElementById('messageInput');
-  const sendButton = document.getElementById('sendButton');
-  const peerIdTextarea = document.getElementById('yourPeerId');
-  const targetPeerIdInput = document.getElementById('targetPeerId');
-  const connectButton = document.getElementById('connectButton');
+let peer = null;
+let conn = null;
 
-  // Initialize the libp2p node
-  async function createNode() {
-    try {
-      const wrtcStar = webRTCStar(); // WebRTC Star transport
+// Initialize PeerJS
+function initializePeer() {
+  // Create a new Peer. You can pass an ID or let PeerJS generate one.
+  peer = new Peer();
 
-      node = await createLibp2p({
-        transports: [wrtcStar.transport],
-        connectionEncryption: [noise()],
-        streamMuxers: [mplex()],
-        peerDiscovery: [wrtcStar.discovery],
-      });
+  // When the connection to the PeerJS server is open and the ID is assigned
+  peer.on('open', (id) => {
+    myPeerIdTextarea.value = id;
+  });
 
-      await node.start();
-
-      // Display the Peer ID
-      peerIdTextarea.value = node.peerId.toString();
-
-      // Handle incoming connections
-      node.handle('/chat/1.0.0', ({ stream }) => {
-        connectedStream = stream;
-        readFromStream(stream);
-        appendMessage('Connected to peer!');
-      });
-
-      console.log(`Node started with Peer ID: ${node.peerId}`);
-    } catch (error) {
-      console.error('Error starting node:', error);
-      appendMessage(`Error: ${error.message}`);
-    }
-  }
-
-  // Connect to a peer using their Peer ID
-  async function connectToPeer() {
-    const targetPeerId = targetPeerIdInput.value.trim();
-    if (!targetPeerId) {
-      alert('Please enter a valid peer ID.');
+  // Handle incoming connections
+  peer.on('connection', (connection) => {
+    if (conn && conn.open) {
+      connection.close(); // Reject additional connections
       return;
     }
 
-    try {
-      console.log(`Connecting to peer: ${targetPeerId}`);
-      const { stream } = await node.dialProtocol(`/p2p/${targetPeerId}`, '/chat/1.0.0');
-      connectedStream = stream;
-      appendMessage(`Connected to peer: ${targetPeerId}`);
-      readFromStream(stream);
-    } catch (error) {
-      console.error('Connection error:', error);
-      appendMessage(`Failed to connect: ${error.message}`);
-    }
-  }
+    conn = connection;
+    setupConnection();
+  });
 
-  // Send a message to the connected peer
-  async function sendMessage() {
-    const message = messageInput.value.trim();
-    if (!message || !connectedStream) return;
+  // Handle errors
+  peer.on('error', (err) => {
+    console.error(err);
+    alert('' + err);
+  });
+}
 
-    try {
-      await connectedStream.sink([fromString(message)]);
-      appendMessage(`You: ${message}`);
-      messageInput.value = '';
-    } catch (error) {
-      console.error('Send error:', error);
-      appendMessage(`Failed to send message: ${error.message}`);
-    }
-  }
+// Setup connection event handlers
+function setupConnection() {
+  conn.on('open', () => {
+    appendMessage('Connection established', 'local');
+  });
 
-  // Read messages from the stream
-  async function readFromStream(stream) {
-    try {
-      for await (const chunk of stream.source) {
-        const message = toString(chunk.subarray());
-        appendMessage(`Peer: ${message}`);
-      }
-    } catch (error) {
-      console.error('Read error:', error);
-      appendMessage(`Read error: ${error.message}`);
-    }
-  }
+  conn.on('data', (data) => {
+    appendMessage(`Peer: ${data}`, 'remote');
+  });
 
-  // Append a message to the chat area
-  function appendMessage(text) {
-    const messageDiv = document.createElement('div');
-    messageDiv.textContent = text;
-    messageList.appendChild(messageDiv);
-  }
+  conn.on('close', () => {
+    appendMessage('Connection closed', 'local');
+    conn = null;
+  });
+}
 
-  // Add event listeners
-  connectButton.addEventListener('click', connectToPeer);
-  sendButton.addEventListener('click', sendMessage);
+// Append messages to the chat
+function appendMessage(message, type) {
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `message ${type}`;
+  msgDiv.textContent = message;
+  chatDiv.appendChild(msgDiv);
+  chatDiv.scrollTop = chatDiv.scrollHeight;
+}
 
-  // Start the node
-  await createNode();
+// Copy Peer ID to clipboard
+copyIdButton.onclick = () => {
+  myPeerIdTextarea.select();
+  myPeerIdTextarea.setSelectionRange(0, 99999); // For mobile devices
+  navigator.clipboard.writeText(myPeerIdTextarea.value)
+    .then(() => {
+      alert('Peer ID copied to clipboard!');
+    })
+    .catch(err => {
+      console.error('Failed to copy!', err);
+    });
 };
+
+// Connect to another peer
+connectButton.onclick = () => {
+  const peerId = peerIdInput.value.trim();
+  if (!peerId) {
+    alert('Please enter a valid Peer ID.');
+    return;
+  }
+
+  if (conn && conn.open) {
+    alert('Already connected to a peer.');
+    return;
+  }
+
+  conn = peer.connect(peerId);
+
+  conn.on('open', () => {
+    appendMessage('Connection established', 'local');
+  });
+
+  conn.on('data', (data) => {
+    appendMessage(`Peer: ${data}`, 'remote');
+  });
+
+  conn.on('close', () => {
+    appendMessage('Connection closed', 'local');
+    conn = null;
+  });
+
+  conn.on('error', (err) => {
+    console.error(err);
+    alert('Connection error: ' + err);
+  });
+};
+
+// Send a message
+sendButton.onclick = () => {
+  const message = messageInput.value.trim();
+  if (!message) {
+    return;
+  }
+
+  if (conn && conn.open) {
+    conn.send(message);
+    appendMessage(`You: ${message}`, 'local');
+    messageInput.value = '';
+  } else {
+    alert('No active connection. Please connect to a peer first.');
+  }
+};
+
+// Optional: Handle Enter key for sending messages
+messageInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    sendButton.click();
+  }
+});
+
+// Initialize the PeerJS connection when the page loads
+initializePeer();
