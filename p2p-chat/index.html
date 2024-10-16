@@ -3,32 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <title>P2P Chat with libp2p and Vite</title>
+  <link rel="stylesheet" href="/style.css">
   <style>
-    body { font-family: sans-serif; }
-    #messageList { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; }
-    #messageInput { width: 80%; }
-    textarea { width: 100%; }
+    /* If you prefer inline styles, you can place CSS here */
   </style>
 </head>
 <body>
-  <h1>P2P Chat with libp2p and Vite</h1>
-  <div>
-    <label>Your Peer ID:</label>
-    <input type="text" id="yourPeerId" readonly style="width: 100%;" />
-  </div>
-  <div>
-    <label>Your Addresses:</label>
-    <textarea id="yourAddresses" readonly rows="4"></textarea>
-  </div>
-  <div>
-    <label>Target Peer Multiaddress:</label>
-    <input type="text" id="targetPeerAddr" style="width: 100%;" placeholder="Paste peer address here" />
-    <button id="connectButton">Connect to Peer</button>
-  </div>
-  <div id="messageList"></div>
-  <div>
-    <input type="text" id="messageInput" placeholder="Type a message..." />
-    <button id="sendButton">Send Message</button>
+  <div class="container">
+    <div class="chat-window">
+      <div class="header">
+        <h2>P2P Chat</h2>
+      </div>
+      <div class="chat-area" id="messageList">
+        <!-- Messages will appear here -->
+      </div>
+      <div class="message-input">
+        <input type="text" id="messageInput" placeholder="Type a message..." />
+        <button id="sendButton">Send</button>
+      </div>
+    </div>
+    <div class="sidebar">
+      <h3>Your Information</h3>
+      <label>Your Peer ID:</label>
+      <input type="text" id="yourPeerId" readonly />
+      <label>Your Addresses:</label>
+      <textarea id="yourAddresses" readonly rows="4"></textarea>
+      <h3>Connect to Peer</h3>
+      <input type="text" id="targetPeerAddr" placeholder="Paste peer address here" />
+      <button id="connectButton">Connect</button>
+    </div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>
