@@ -1,5 +1,5 @@
-// main.js
 import Peer from 'peerjs';
+import { loadOnnxModel } from './model.js';
 
 // Elements
 const myPeerIdTextarea = document.getElementById('my-peer-id');
@@ -9,21 +9,19 @@ const connectButton = document.getElementById('connect-peer');
 const chatDiv = document.getElementById('chat');
 const messageInput = document.getElementById('message');
 const sendButton = document.getElementById('send');
+const sendModelButton = document.getElementById('send-model');
 
 let peer = null;
 let conn = null;
 
 // Initialize PeerJS
 function initializePeer() {
-  // Create a new Peer. You can pass an ID or let PeerJS generate one.
   peer = new Peer();
 
-  // When the connection to the PeerJS server is open and the ID is assigned
   peer.on('open', (id) => {
     myPeerIdTextarea.value = id;
   });
 
-  // Handle incoming connections
   peer.on('connection', (connection) => {
     if (conn && conn.open) {
       connection.close(); // Reject additional connections
@@ -34,10 +32,8 @@ function initializePeer() {
     setupConnection();
   });
 
-  // Handle errors
   peer.on('error', (err) => {
-    console.error(err);
-    alert('' + err);
+    console.error('PeerJS error:', err);
   });
 }
 
@@ -48,7 +44,11 @@ function setupConnection() {
   });
 
   conn.on('data', (data) => {
-    appendMessage(`Peer: ${data}`, 'remote');
+    if (data instanceof ArrayBuffer) {
+      handleReceivedModel(data);
+    } else {
+      appendMessage(`Peer: ${data}`, 'remote');
+    }
   });
 
   conn.on('close', () => {
@@ -69,14 +69,8 @@ function appendMessage(message, type) {
 // Copy Peer ID to clipboard
 copyIdButton.onclick = () => {
   myPeerIdTextarea.select();
-  myPeerIdTextarea.setSelectionRange(0, 99999); // For mobile devices
-  navigator.clipboard.writeText(myPeerIdTextarea.value)
-    .then(() => {
-      alert('Peer ID copied to clipboard!');
-    })
-    .catch(err => {
-      console.error('Failed to copy!', err);
-    });
+  document.execCommand('copy');
+  alert('Peer ID copied to clipboard!');
 };
 
 // Connect to another peer
@@ -93,32 +87,13 @@ connectButton.onclick = () => {
   }
 
   conn = peer.connect(peerId);
-
-  conn.on('open', () => {
-    appendMessage('Connection established', 'local');
-  });
-
-  conn.on('data', (data) => {
-    appendMessage(`Peer: ${data}`, 'remote');
-  });
-
-  conn.on('close', () => {
-    appendMessage('Connection closed', 'local');
-    conn = null;
-  });
-
-  conn.on('error', (err) => {
-    console.error(err);
-    alert('Connection error: ' + err);
-  });
+  setupConnection();
 };
 
 // Send a message
 sendButton.onclick = () => {
   const message = messageInput.value.trim();
-  if (!message) {
-    return;
-  }
+  if (!message) return;
 
   if (conn && conn.open) {
     conn.send(message);
@@ -129,12 +104,34 @@ sendButton.onclick = () => {
   }
 };
 
-// Optional: Handle Enter key for sending messages
-messageInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    sendButton.click();
+// Handle ONNX Model Sending
+sendModelButton.onclick = async () => {
+  if (conn && conn.open) {
+    const modelBuffer = await loadOnnxModel();  // Load ONNX model as binary
+    conn.send(modelBuffer);
+    appendMessage('ONNX Model sent', 'local');
+  } else {
+    alert('No active connection. Please connect to a peer first.');
   }
-});
+};
 
-// Initialize the PeerJS connection when the page loads
+// Handle receiving ONNX model and use ONNX.js for inference
+async function handleReceivedModel(data) {
+  appendMessage('ONNX Model received', 'remote');
+
+  // Load the ONNX model using ONNX.js
+  const session = await ort.InferenceSession.create(data);
+  console.log('ONNX Model loaded successfully');
+
+  // Prepare input for the model (example: 2-element vector)
+  const inputTensor = new ort.Tensor('float32', [1.0, 2.0], [1, 2]);
+
+  // Run the model
+  const results = await session.run({ input: inputTensor });
+
+  // Output the result
+  console.log('Inference result:', results);
+}
+
+// Initialize PeerJS connection when the page loads
 initializePeer();

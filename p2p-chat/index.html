@@ -2,9 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" href="/favicon.ico" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>P2P Chat with PeerJS</title>
+  <title>P2P Chat and ONNX Model with PeerJS</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -35,58 +34,36 @@
       text-align: left;
       color: green;
     }
-    .section {
-      margin-bottom: 30px;
-    }
-    .instructions {
-      background-color: #eef;
-      padding: 10px;
-      margin-bottom: 20px;
-      border: 1px solid #99c;
-    }
   </style>
 </head>
 <body>
-  <h1>P2P Chat Application with PeerJS</h1>
+  <h1>P2P Chat and ONNX Model Transfer with PeerJS</h1>
 
-  <div class="instructions">
-    <h2>Instructions</h2>
-    <ol>
-      <li><strong>Start the Application:</strong> Open the application in two separate browser windows or devices.</li>
-      <li><strong>Peer 1 (Host):</strong>
-        <ul>
-          <li>Your Peer ID is displayed below. Share this ID with Peer 2.</li>
-        </ul>
-      </li>
-      <li><strong>Peer 2 (Client):</strong>
-        <ul>
-          <li>Enter Peer 1's ID into the "Connect to Peer ID" field and click "Connect".</li>
-        </ul>
-      </li>
-      <li><strong>Chat:</strong> Once connected, both peers can send messages to each other.</li>
-    </ol>
-    <p><strong>Note:</strong> This setup uses PeerJS's default signaling server. For production use, consider hosting your own signaling server.</p>
-  </div>
-
-  <div class="section">
+  <div>
     <h2>Your Peer ID</h2>
     <textarea id="my-peer-id" readonly placeholder="Your Peer ID will appear here"></textarea>
     <button id="copy-id">Copy My Peer ID</button>
   </div>
 
-  <div class="section">
+  <div>
     <h2>Connect to a Peer</h2>
     <input type="text" id="peer-id-input" placeholder="Enter Peer ID to connect" />
     <button id="connect-peer">Connect</button>
   </div>
 
-  <div class="section">
+  <div>
     <h2>Chat</h2>
     <div id="chat"></div>
     <input type="text" id="message" placeholder="Type your message here..." />
     <button id="send">Send</button>
   </div>
 
-  <script type="module" src="src/main.js"></script>
+  <div>
+    <h2>Send ONNX Model</h2>
+    <button id="send-model">Send ONNX Model</button>
+  </div>
+
+  <!-- Include the main.js script -->
+  <script type="module" src="/src/main.js"></script>
 </body>
 </html>
