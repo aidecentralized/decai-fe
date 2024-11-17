@@ -11,6 +11,7 @@ async def run():
     max_users = 2  # Replace with user input
     rounds = 5
     current_round = 0
+    rank = -1
 
     # Debugging: Log connection state changes
     @pc.on("connectionstatechange")
@@ -69,23 +70,45 @@ async def run():
 
             if data.get("action") == "start_session":
                 print(f"[DEBUG] Session started. Peers: {data['peers']}")
-                asyncio.create_task(setup_peer_connections(data["peers"], pc, signaling))
+                # Get client rank by finding the index of the current client in the list of peers
+                for ind, [host, port, *_] in enumerate(data["peers"]):
+                    if host == signaling.local_address[0] and port == signaling.local_address[1]:
+                        rank = ind
+                        break
+                print(f"[DEBUG] Client rank: {rank}")
+                asyncio.create_task(setup_peer_connections(data["peers"], rank, pc, signaling))
 
             elif "sdp" in data:
-                print(f"[DEBUG] Received SDP: {data['sdp']['type']}")
+                print(f"[DEBUG] Received SDP: {data['sdp']['type']}, data is {data}")
                 desc = RTCSessionDescription(sdp=data["sdp"]["sdp"], type=data["sdp"]["type"])
-                await pc.setRemoteDescription(desc)
+
                 if desc.type == "offer":
-                    print("[DEBUG] Creating SDP answer...")
-                    answer = await pc.createAnswer()
-                    await pc.setLocalDescription(answer)
-                    await signaling.send(json.dumps({
-                        "sdp": {
-                            "type": pc.localDescription.type,
-                            "sdp": pc.localDescription.sdp
-                        },
-                        "target": data["source"]  # Ensure `source` identifies the correct peer
-                    }))
+                    # Handle SDP offer
+                    if pc.signalingState in ["stable", "have-local-offer"]:
+                        print("[DEBUG] Received SDP offer. Setting remote description...")
+                        await pc.setRemoteDescription(desc)
+                        print("[DEBUG] Creating SDP answer...")
+                        answer = await pc.createAnswer()
+                        await pc.setLocalDescription(answer)
+                        await signaling.send(json.dumps({
+                            "sdp": {
+                                "type": pc.localDescription.type,
+                                "sdp": pc.localDescription.sdp
+                            },
+                            "target": data["source"],  # Send the answer to the offerer
+                            "source": signaling.local_address
+                        }))
+                    else:
+                        print(f"[ERROR] Cannot handle offer in signaling state: {pc.signalingState}")
+
+                elif desc.type == "answer":
+                    # Handle SDP answer
+                    if pc.signalingState == "have-local-offer":
+                        print("[DEBUG] Received SDP answer. Setting remote description...")
+                        await pc.setRemoteDescription(desc)
+                    else:
+                        print(f"[ERROR] Cannot handle answer in signaling state: {pc.signalingState}")
+
 
             elif "candidate" in data:
                 print("[DEBUG] Received ICE candidate")
@@ -103,10 +126,14 @@ async def run():
                 await pc.addIceCandidate(candidate)
 
 
-async def setup_peer_connections(peers, pc, signaling):
+async def setup_peer_connections(peers, rank, pc, signaling):
     """Establish peer connections using SDP and ICE."""
-    for peer in peers:
-        print(f"[DEBUG] Creating SDP offer for peer {peer}")
+
+    # Only create SDP offer to nodes with lower rank
+    for ind, peer in enumerate(peers):
+        if ind >= rank:
+            break
+        print(f"[DEBUG] Creating SDP offer for peer {peer} with rank {ind}")
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
         print(f"[DEBUG] SDP offer sent to peer {peer}")
@@ -115,7 +142,8 @@ async def setup_peer_connections(peers, pc, signaling):
                 "type": pc.localDescription.type,
                 "sdp": pc.localDescription.sdp
             },
-            "target": peer  # Send to the specific peer
+            "target": peer,  # Send to the specific peer
+            "source": signaling.local_address  # Identify the source peer
         }))
 
 

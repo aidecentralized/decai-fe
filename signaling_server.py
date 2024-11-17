@@ -7,7 +7,7 @@ sessions = defaultdict(list)
 
 async def signaling(websocket):
     async for message in websocket:
-        print(f"Received message: {message}")  # Debugging received data
+        print(f"Received message:")  # Debugging received data
         try:
             data = json.loads(message)
 
@@ -20,8 +20,8 @@ async def signaling(websocket):
                 # Relay message to the target peer
                 for peer in sessions[session_code]:
                     print(f"Checking {peer.remote_address} against {target_peer}")
-                    if (a == b for a, b in zip(peer.remote_address, target_peer)): # Compare IP addresses
-                        print(f"Relaying message to {peer}, {data}")
+                    if all(a == b for a, b in zip(peer.remote_address, target_peer)):
+                        print(f"Relaying message to {peer.remote_address}, {data['sdp']['type']}, target: {data.get('target')}, source: {data.get('source')}")
                         await peer.send(json.dumps(data))
                 continue
 
@@ -34,11 +34,12 @@ async def signaling(websocket):
                 sessions[session_code].append(websocket)
 
                 if len(sessions[session_code]) == max_users:
-                    print(f"Session {session_code} is ready, sending {[c.remote_address for c in sessions[session_code] if c != websocket]}")
+                    print(f"Session {session_code} is ready, sending {[c.remote_address for c in sessions[session_code]]}")
                     for conn in sessions[session_code]:
                         await conn.send(json.dumps({
                             "action": "start_session",
-                            "peers": [c.remote_address for c in sessions[session_code] if c != conn]
+                            # "peers": [c.remote_address for c in sessions[session_code] if c != conn]
+                            "peers": [c.remote_address for c in sessions[session_code]]
                         }))
                     # del sessions[session_code]
                 continue
