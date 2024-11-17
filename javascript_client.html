@@ -12,90 +12,72 @@
   <script>
     let pc = new RTCPeerConnection();
     let signaling = new WebSocket('ws://localhost:8765');
-    let dataChannel = pc.createDataChannel("chat");
+    let dataChannel = pc.createDataChannel("training");
+    let sessionCode = "mySessionCode"; // Replace with user input
+    let maxUsers = 3; // Replace with user input
     let rounds = 5;
     let currentRound = 0;
 
-    // Wait for the WebSocket to open before setting up the WebRTC connection
     signaling.onopen = () => {
-      console.log("Signaling WebSocket connection opened");
-
-      // Create an offer and send it to the Python client
-      pc.createOffer().then(offer => pc.setLocalDescription(offer))
-        .then(() => {
-          signaling.send(JSON.stringify({ 'sdp': pc.localDescription }));
-        });
-    };
-
-    // Handle ICE candidates once WebSocket is open
-    pc.onicecandidate = ({ candidate }) => {
-      if (candidate && signaling.readyState === WebSocket.OPEN) {
-        signaling.send(JSON.stringify({ 'candidate': candidate }));
-      } else if (candidate) {
-        console.log("WebSocket not open, delaying candidate send");
-      }
-    };
-
-    dataChannel.onopen = () => {
-      console.log("Data Channel Opened");
-    //   document.getElementById("sendButton").disabled = false;
-    };
-
-    dataChannel.onclose = () => console.log("Data Channel Closed");
-
-    dataChannel.onmessage = async (event) => {
-      let data = JSON.parse(event.data);
-
-      if (data.weights && currentRound < rounds) {
-        console.log(`JavaScript received weights for round ${data.round + 1}`);
-        console.log(`Recieved weights: ${JSON.stringify(data.weights)}`);
-        
-        // Simulate training by calling an async function
-        await simulateTraining(data.round + 1);
-
-        // Send back weights to Python
-        currentRound = data.round + 1;
-        console.log(`Sending weights ${JSON.stringify(data.weights)} for round ${currentRound}`);
-        dataChannel.send(JSON.stringify({ weights: data.weights, round: currentRound }));
-      }
-       
-      if (currentRound >= rounds) {
-        console.log("Training complete");
-        console.log("Closing data channel and peer connection from JavaScript");
-        dataChannel.close();
-        pc.close();
-      }
+        signaling.send(JSON.stringify({
+            action: "join_session",
+            session_code: sessionCode,
+            max_users: maxUsers
+        }));
     };
 
     signaling.onmessage = async (message) => {
-      let data = JSON.parse(message.data);
+        const data = JSON.parse(message.data);
 
-      if (data.sdp) {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        if (data.sdp.type === "offer") {
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          signaling.send(JSON.stringify({ 'sdp': pc.localDescription }));
+        if (data.action === "start_session") {
+            console.log("Session started. Peers:", data.peers);
+            setupPeerConnections(data.peers);
         }
-      } else if (data.candidate) {
-        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-      }
+        if (data.sdp) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          if (data.sdp.type === "offer") {
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              signaling.send(JSON.stringify({
+                  sdp: pc.localDescription,
+                  target: data.source  // Send the answer back to the source peer
+              }));
+          }
+        } else if (data.candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
     };
 
-    // Simulate training with a delay
-    async function simulateTraining(round) {
-      console.log(`JavaScript is training for round ${round}`);
-      return new Promise(resolve => setTimeout(resolve, 1000));  // 1 second delay
-    }
+    async function setupPeerConnections(peers) {
+    for (const peerPort of peers) {
+        // Create offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
 
-    // Send a message to the Python client if the data channel is open
-    function sendMessage() {
-      if (dataChannel.readyState === "open") {
-        dataChannel.send("Hello from JavaScript!");
-      } else {
-        console.error("Data Channel is not open!");
-      }
+        // Send SDP offer to signaling server with target peer
+        signaling.send(JSON.stringify({
+            sdp: pc.localDescription,
+            target: peerPort  // Include target peer's port
+        }));
+    }
+}
+
+    dataChannel.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.weights && currentRound < rounds) {
+            console.log(`Round ${currentRound + 1}: Received weights`);
+            currentRound++;
+            await simulateTraining();
+            dataChannel.send(JSON.stringify({ weights: data.weights, round: currentRound }));
+        }
+    };
+
+    async function simulateTraining() {
+        console.log(`Training for round ${currentRound}`);
+        return new Promise(resolve => setTimeout(resolve, 1000)); // Simulate training
     }
   </script>
+
 </body>
 </html>
