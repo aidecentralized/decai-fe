@@ -2,13 +2,17 @@ import asyncio
 import json
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCDataChannel
 import websockets
+from collections import deque
 
+offer_queue = deque()
+port2rank = {}
+ice_states = {}  # Dictionary to track ICE states per peer
 
 async def run():
     pc = RTCPeerConnection()
     data_channel = pc.createDataChannel("training")  # Ensure data channel exists
     session_code = "mySessionCode"  # Replace with user input
-    max_users = 2  # Replace with user input
+    max_users = 3  # Replace with user input
     rounds = 5
     current_round = 0
     rank = -1
@@ -21,6 +25,7 @@ async def run():
     # Debugging: Log ICE connection state changes
     @pc.on("iceconnectionstatechange")
     def on_iceconnectionstatechange():
+        for 
         print(f"[DEBUG] ICE connection state: {pc.iceConnectionState}")
 
     # Debugging: Log ICE candidates as they are generated
@@ -44,10 +49,13 @@ async def run():
             "max_users": max_users
         }))
 
+        # Start the offer queue handler
+        asyncio.create_task(handle_offer_queue(pc, signaling))
+
         # Handle DataChannel events
         @data_channel.on("open")
         def on_open():
-            print("[DEBUG] Data channel is open!")
+            print("[DEBUG] Data channel is open")
 
         @data_channel.on("close")
         def on_close():
@@ -70,6 +78,7 @@ async def run():
 
             if data.get("action") == "start_session":
                 print(f"[DEBUG] Session started. Peers: {data['peers']}")
+                port2rank = {port: ind for ind, [_, port, *_] in enumerate(data["peers"])}
                 # Get client rank by finding the index of the current client in the list of peers
                 for ind, [host, port, *_] in enumerate(data["peers"]):
                     if host == signaling.local_address[0] and port == signaling.local_address[1]:
@@ -79,14 +88,20 @@ async def run():
                 asyncio.create_task(setup_peer_connections(data["peers"], rank, pc, signaling))
 
             elif "sdp" in data:
-                print(f"[DEBUG] Received SDP: {data['sdp']['type']}, data is {data}")
+                print(f"[DEBUG] Received SDP: {data['sdp']['type']}, target: {port2rank.get(data.get('target')[1])}, source: {port2rank.get(data.get('source')[1])}")
                 desc = RTCSessionDescription(sdp=data["sdp"]["sdp"], type=data["sdp"]["type"])
 
                 if desc.type == "offer":
                     # Handle SDP offer
-                    if pc.signalingState in ["stable", "have-local-offer"]:
-                        print("[DEBUG] Received SDP offer. Setting remote description...")
+                    if pc.signalingState not in ["stable", "have-local-offer"]:
+                        print(f"[DEBUG] Enqueuing offer from {port2rank.get(data.get('source')[1])} due to signaling state: {pc.signalingState}")
+                        offer_queue.append(data)
+                    else:
+                        # handle offer immediately
+                        print(f"[DEBUG] Handling offer from {port2rank.get(data.get('source')[1])} immediately")
+                        print(f"[DEBUG] Signaling state before: {pc.signalingState}")
                         await pc.setRemoteDescription(desc)
+                        print(f"[DEBUG] Signaling state after: {pc.signalingState}")
                         print("[DEBUG] Creating SDP answer...")
                         answer = await pc.createAnswer()
                         await pc.setLocalDescription(answer)
@@ -98,14 +113,13 @@ async def run():
                             "target": data["source"],  # Send the answer to the offerer
                             "source": signaling.local_address
                         }))
-                    else:
-                        print(f"[ERROR] Cannot handle offer in signaling state: {pc.signalingState}")
 
                 elif desc.type == "answer":
                     # Handle SDP answer
                     if pc.signalingState == "have-local-offer":
-                        print("[DEBUG] Received SDP answer. Setting remote description...")
+                        print(f"[DEBUG] Signaling state before: {pc.signalingState}")
                         await pc.setRemoteDescription(desc)
+                        print(f"[DEBUG] Signaling state after: {pc.signalingState}")
                     else:
                         print(f"[ERROR] Cannot handle answer in signaling state: {pc.signalingState}")
 
@@ -127,16 +141,19 @@ async def run():
 
 
 async def setup_peer_connections(peers, rank, pc, signaling):
-    """Establish peer connections using SDP and ICE."""
-
-    # Only create SDP offer to nodes with lower rank
+    """Establish peer connections using SDP and ICE, one peer at a time."""
     for ind, peer in enumerate(peers):
         if ind >= rank:
             break
-        print(f"[DEBUG] Creating SDP offer for peer {peer} with rank {ind}")
+
+        print(f"[DEBUG] Initiating connection with peer rank {ind}")
+        
+        # Create SDP offer for the peer
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
-        print(f"[DEBUG] SDP offer sent to peer {peer}")
+        print(f"[DEBUG] SDP offer created and sent to peer rank {ind}")
+
+        # Send the SDP offer to the signaling server
         await signaling.send(json.dumps({
             "sdp": {
                 "type": pc.localDescription.type,
@@ -146,7 +163,46 @@ async def setup_peer_connections(peers, rank, pc, signaling):
             "source": signaling.local_address  # Identify the source peer
         }))
 
+        # Wait for the answer
+        print(f"[DEBUG] Waiting for SDP answer from peer rank {ind}")
+        # Wait for connection to stabilize
+        while ice_states.get(ind) not in ["completed", "connected"]:
+            print(f"[DEBUG] Waiting for ICE connection state with peer rank {ind} ({peer})...")
+            await asyncio.sleep(0.1)
+        # while pc.signalingState != "stable":
+        #     await asyncio.sleep(0.1)  # Small delay to wait for the state to stabilize
 
+        print(f"[DEBUG] Connection with peer rank {ind} established.")
+
+
+async def handle_offer_queue(pc, signaling):
+    """Process queued SDP offers sequentially."""
+    while True:
+        if offer_queue:
+            offer = offer_queue.popleft()
+            print(f"[DEBUG] Processing queued offer from {port2rank.get(offer['source'][1], offer['source'])}")
+
+            # Set remote description for the offer
+            desc = RTCSessionDescription(sdp=offer["sdp"]["sdp"], type=offer["sdp"]["type"])
+            print(f"[DEBUG] Signaling state before: {pc.signalingState}")
+            await pc.setRemoteDescription(desc)
+            print(f"[DEBUG] Signaling state after: {pc.signalingState}")
+
+
+            # Create and send SDP answer
+            print("[DEBUG] Creating SDP answer...")
+            answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+            await signaling.send(json.dumps({
+                "sdp": {
+                    "type": pc.localDescription.type,
+                    "sdp": pc.localDescription.sdp
+                },
+                "target": offer["source"],  # Respond to the offerer
+                "source": signaling.local_address
+            }))
+        else:
+            await asyncio.sleep(0.1)  # Avoid busy waiting
 async def simulate_training():
     """Simulate a training round."""
     print("[DEBUG] Simulating training...")
