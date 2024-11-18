@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import websockets
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCDataChannel, RTCConfiguration, RTCIceServer
 import logging
@@ -8,12 +9,12 @@ from typing import Dict, Set
 from enum import Enum
 import time
 
-logging.basicConfig(level=logging.INFO)
-
 class NodeState(Enum):
     CONNECTING = 1
     READY = 2
     DISCONNECTING = 3
+
+logging.basicConfig(level=logging.INFO)
 
 class TorusNode:
     def __init__(self, signaling_server: str):
@@ -34,18 +35,57 @@ class TorusNode:
         self.expected_connections = 0  # Track how many connections we expect
         self.connection_timeout = 30  # Timeout in seconds for connection attempts
         self.ice_gathering_timeout = 10 # Timeout in seconds for ICE gathering
+        self.logger = self.setup_logger()
+
+    def setup_logger(self) -> logging.Logger:
+        # Create logs directory if it doesn't exist
+        os.makedirs("logs", exist_ok=True)
         
+        # Create a logger for this instance
+        logger = logging.getLogger(f"Node")  # Will be updated with rank later
+        logger.setLevel(logging.INFO)
+        
+        # Remove any existing handlers
+        logger.handlers.clear()
+        
+        # We'll add the file handler when we get our rank
+        return logger
+
+    def setup_file_logging(self):
+        if self.rank is not None:
+            # Create file handler
+            fh = logging.FileHandler(f"logs/client_{self.rank}.log")
+            fh.setLevel(logging.INFO)
+            
+            # Create formatter
+            formatter = logging.Formatter(
+                '%(asctime)s - %(levelname)s - %(message)s'
+            )
+            fh.setFormatter(formatter)
+            
+            # Add rank to logger name
+            self.logger = logging.getLogger(f"Node-{self.rank}")
+            
+            # Add handler
+            self.logger.handlers.clear()  # Remove any existing handlers
+            self.logger.addHandler(fh)
+            
+            # Add console handler as well
+            ch = logging.StreamHandler()
+            ch.setFormatter(formatter)
+            self.logger.addHandler(ch)
+
     async def change_state(self, new_state: NodeState):
         async with self.state_lock:
             self.state = new_state
-            logging.info(f"Node {self.rank} state changed to {new_state}")
+            self.logger.info(f"Node {self.rank} state changed to {new_state}")
 
     async def setup_data_channel(self, channel: RTCDataChannel, peer_rank: int):
         self.data_channels[peer_rank] = channel
 
         @channel.on("open")
         def on_open():
-            logging.info(f"Data channel opened with peer {peer_rank}")
+            self.logger.info(f"Data channel opened with peer {peer_rank}")
             asyncio.create_task(self.on_peer_connected(peer_rank))
             asyncio.create_task(self.ping_loop(peer_rank))
 
@@ -54,7 +94,7 @@ class TorusNode:
             try:
                 data = json.loads(message)
                 if data["type"] == "ping":
-                    logging.info(f"{self.rank} Received ping from {peer_rank}")
+                    self.logger.info(f"{self.rank} Received ping from {peer_rank}")
                     channel.send(json.dumps({
                         "type": "pong",
                         "timestamp": data["timestamp"],
@@ -62,14 +102,14 @@ class TorusNode:
                     }))
                 elif data["type"] == "pong":
                     rtt = time.time() * 1000 - data["timestamp"]
-                    logging.info(f"{self.rank} Received pong from {peer_rank}, RTT: {rtt:.2f}ms")
+                    self.logger.info(f"{self.rank} Received pong from {peer_rank}, RTT: {rtt:.2f}ms")
             except json.JSONDecodeError:
                 logging.error(f"Failed to parse message from {peer_rank}: {message}")
 
     async def on_peer_connected(self, peer_rank: int):
         self.connected_peers.add(peer_rank)
         self.pending_connections.discard(peer_rank)
-        logging.info(f"Node {self.rank} connected to peer {peer_rank}. "
+        self.logger.info(f"Node {self.rank} connected to peer {peer_rank}. "
                     f"Connected: {len(self.connected_peers)}/{self.expected_connections}")
         
         await self.websocket.send(json.dumps({
@@ -92,7 +132,7 @@ class TorusNode:
         while True:
             try:
                 target_rank = await self.connection_queue.get()
-                logging.info(f"Node {self.rank} worker processing connection to {target_rank}")
+                self.logger.info(f"Node {self.rank} worker processing connection to {target_rank}")
                 retry_count = self.connection_retries[target_rank]
                 
                 try:
@@ -100,7 +140,7 @@ class TorusNode:
                         self.initiate_connection(target_rank),
                         timeout=self.connection_timeout
                     )
-                    logging.info(f"Node {self.rank} successfully initiated connection to {target_rank}")
+                    self.logger.info(f"Node {self.rank} successfully initiated connection to {target_rank}")
                     self.connection_retries[target_rank] = 0
                 except asyncio.TimeoutError:
                     logging.error(f"Connection timeout to {target_rank}")
@@ -132,16 +172,16 @@ class TorusNode:
             
             @pc.on("iceconnectionstatechange")
             async def on_ice_connection_state_change():
-                logging.info(f"ICE connection state to {target_rank}: {pc.iceConnectionState}")
+                self.logger.info(f"ICE connection state to {target_rank}: {pc.iceConnectionState}")
                 if pc.iceConnectionState == "failed":
                     logging.error(f"ICE connection to {target_rank} failed")
                     await self.handle_connection_failure(target_rank)
                 elif pc.iceConnectionState == "connected":
-                    logging.info(f"ICE connection to {target_rank} established")
+                    self.logger.info(f"ICE connection to {target_rank} established")
 
             @pc.on("icegatheringstatechange")
             async def on_ice_gathering_state_change():
-                logging.info(f"ICE gathering state for {target_rank}: {pc.iceGatheringState}")
+                self.logger.info(f"ICE gathering state for {target_rank}: {pc.iceGatheringState}")
 
             # Create data channel first
             channel = pc.createDataChannel(f"chat-{self.rank}-{target_rank}")
@@ -202,7 +242,7 @@ class TorusNode:
             if rank in self.connected_peers:
                 self.connected_peers.remove(rank)
                 
-            logging.info(f"Cleaned up connection to peer {rank}")
+            self.logger.info(f"Cleaned up connection to peer {rank}")
             
         except Exception as e:
             logging.error(f"Error during connection cleanup for peer {rank}: {e}")
@@ -215,7 +255,7 @@ class TorusNode:
             if target_rank not in self.connected_peers:
                 await self.cleanup_connection(target_rank)  # Clean up before retrying
                 await self.connection_queue.put(target_rank)
-                logging.info(f"Retrying connection to {target_rank}, attempt {retry_count + 1}")
+                self.logger.info(f"Retrying connection to {target_rank}, attempt {retry_count + 1}")
         else:
             logging.error(f"Max retries reached for {target_rank}")
             await self.cleanup_connection(target_rank)
@@ -299,7 +339,7 @@ class TorusNode:
                     while True:
                         message = await websocket.recv()
                         data = json.loads(message)
-                        logging.info(f"Node received message: {data['type']}")
+                        self.logger.info(f"Node received message: {data['type']}")
                         
                         if data["type"] == "topology":
                             await self.handle_topology(data)
@@ -320,24 +360,25 @@ class TorusNode:
 
     async def handle_topology(self, data):
         self.rank = data["rank"]
+        self.setup_file_logging()
         new_neighbors = data["neighbors"]
-        logging.info(f"Node {self.rank} received topology. Neighbors: {new_neighbors}")
-        
+        self.logger.info(f"Node {self.rank} received topology. Neighbors: {new_neighbors}")
+
         if self.neighbors:
             removed = set(self.neighbors.values()) - set(new_neighbors.values())
             for rank in removed:
                 await self.cleanup_connection(rank)
-                
+
         self.neighbors = new_neighbors
         self.expected_connections = len(new_neighbors)
-        
+
         # Only initiate connections to higher-ranked neighbors
         connection_tasks = []
         for neighbor_rank in self.neighbors.values():
             if neighbor_rank > self.rank:
                 if (neighbor_rank not in self.connections and 
                     neighbor_rank not in self.pending_connections):
-                    logging.info(f"Node {self.rank} queueing connection to {neighbor_rank}")
+                    self.logger.info(f"Node {self.rank} queueing connection to {neighbor_rank}")
                     await self.connection_queue.put(neighbor_rank)
                     self.pending_connections.add(neighbor_rank)
 
