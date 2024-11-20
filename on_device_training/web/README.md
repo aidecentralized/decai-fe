@@ -9,20 +9,29 @@ medmnist
 numpy
 pandas
 tqdm
+
 Setup Instructions
 1. Clone the Repository and Navigate to the Project Directory
-cd on-device-training-classification-model/on_device_training/web/web-bundler
+cd on-device-training-classification-model/on_device_training
+
 2. Install Node.js Dependencies
 
 3. Install Python Dependencies
-
 pip install medmnist numpy pandas tqdm
+
 4. Prepare the Dataset
 Download the BloodMNIST dataset using the following command:
-python -m medmnist download --flag=bloodmnist --size=28
+
+% pip install medmnist
+% python
+>>> from medmnist import BloodMNIST
+>>> dataset = BloodMINST(split="test", download=True, size=28)
+
+* keep a note of the file path of the downloaded file, for example:
+/Users/ayanshsingh/.medmnist/bloodmnist.npz
 
 Convert the dataset to JSON format by running the conversion script:
-python convert_bloodmnist_to_json.py --data_flag=bloodmnist --output_dir=public/data
+python conversion.py --npz_path (Your npz path)
 
 5. Start the Development Server
 npm start
