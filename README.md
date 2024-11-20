@@ -1,6 +1,6 @@
 <!-- @format -->
 
-# python-p2p-aiortc
+# p2p-rtc
 
 Just a simple demonstration of using aiortc for a p2p application
 
