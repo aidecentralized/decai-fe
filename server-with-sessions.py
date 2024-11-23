@@ -26,6 +26,7 @@ class SessionInfo:
     session_id: str
     max_clients: int
     clients: Dict[websockets.WebSocketServerProtocol, ClientInfo] = None
+    num_ready: int = 0
     
     def __post_init__(self):
         self.clients = {}
@@ -39,19 +40,20 @@ class SignalingServer:
         return math.floor(math.sqrt(len(session.clients)))
         
     def get_neighbor_ranks(self, session: SessionInfo, rank: int) -> dict:
-        grid_size = self.calculate_grid_size(session)
-        if grid_size < 2:
-            return {}
+        # grid_size = self.calculate_grid_size(session)
+        # if grid_size < 2:
+        #     return {}
             
-        row = rank // grid_size
-        col = rank % grid_size
+        # row = rank // grid_size
+        # col = rank % grid_size
         
-        return {
-            'north': ((row - 1 + grid_size) % grid_size) * grid_size + col,
-            'south': ((row + 1) % grid_size) * grid_size + col,
-            'west': row * grid_size + ((col - 1 + grid_size) % grid_size),
-            'east': row * grid_size + ((col + 1) % grid_size)
-        }
+        # return {
+        #     'north': ((row - 1 + grid_size) % grid_size) * grid_size + col,
+        #     'south': ((row + 1) % grid_size) * grid_size + col,
+        #     'west': row * grid_size + ((col - 1 + grid_size) % grid_size),
+        #     'east': row * grid_size + ((col + 1) % grid_size)
+        # }
+        return {'neighbor': (rank + 1) % len(session.clients)}
 
     async def handle_client(self, websocket: websockets.WebSocketServerProtocol):
         try:
@@ -146,11 +148,16 @@ class SignalingServer:
                                 'data': data['data']
                             }))
                 elif data['type'] == 'connection_established':
-                    peer_rank = data['peerRank']
-                    session.clients[websocket].connected_peers.add(peer_rank)
+                    # peer_rank = data['peerRank']
+                    # session.clients[websocket].connected_peers.add(peer_rank)
                     
                     # Check if all connections in the session are established
+                    # await self.check_session_ready(session)
+                    pass
+                elif data['type'] == "node_ready":
+                    session.num_ready += 1
                     await self.check_session_ready(session)
+
 
         except websockets.exceptions.ConnectionClosed:
             # Find and clean up the client's session
@@ -199,11 +206,13 @@ class SignalingServer:
         ])
             
     async def check_session_ready(self, session: SessionInfo):
-        expected_connections = 2  # Each node should connect to 2 neighbors
-        all_ready = all(
-            len(info.connected_peers) == expected_connections 
-            for info in session.clients.values()
-        )
+        # expected_connections = 2  # Each node should connect to 2 neighbors
+        # all_ready = all(
+        #     len(info.connected_peers) == expected_connections 
+        #     for info in session.clients.values()
+        # )
+
+        all_ready = session.num_ready == len(session.clients)
         
         if all_ready:
             logging.info(f"All nodes in session {session.session_id} are connected!")
