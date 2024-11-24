@@ -96,33 +96,70 @@ class TorusNode:
             self.logger.info(f"Node {self.rank} state changed to {new_state}")
 
     async def setup_data_channel(self, channel: RTCDataChannel, peer_rank: int):
+        """
+        Sets up the data channel and handles its events symmetrically for both initiators and receivers.
+        """
+        self.logger.info(f"Setting up data channel with peer {peer_rank}")
+        
+        # Track the data channel and peer information
         self.data_channels[peer_rank] = channel
         self.peer_rounds[peer_rank] = 0
 
+        # If the channel is already open (receiver side), handle the peer connection immediately
+        # if channel.readyState == "open":
+        #     self.logger.info(f"Data channel already open with peer {peer_rank}")
+        #     await self.on_peer_connected(peer_rank)
+
         @channel.on("open")
         def on_open():
+            """
+            Event handler for when the data channel becomes open (initiator side).
+            """
             self.logger.info(f"Data channel opened with peer {peer_rank}")
             asyncio.create_task(self.on_peer_connected(peer_rank))
 
         @channel.on("message")
         def on_message(message):
+            """
+            Event handler for when a message is received on the data channel.
+            """
             asyncio.create_task(self.handle_data_channel_message(peer_rank, message))
 
+        @channel.on("close")
+        def on_close():
+            """
+            Event handler for when the data channel is closed.
+            """
+            self.logger.info(f"Data channel with peer {peer_rank} closed")
+            if peer_rank in self.data_channels:
+                del self.data_channels[peer_rank]
+            if peer_rank in self.connected_peers:
+                self.connected_peers.remove(peer_rank)
+
+        self.logger.info(f"Data channel setup complete for peer {peer_rank}")
+
+
     async def on_peer_connected(self, peer_rank: int):
-            self.connected_peers.add(peer_rank)
-            self.pending_connections.discard(peer_rank)
-            self.logger.info(f"Node {self.rank} connected to peer {peer_rank}. "
+        """
+        Handles the logic for when a peer is connected, either as an initiator or receiver.
+        """
+        self.connected_peers.add(peer_rank)
+        self.pending_connections.discard(peer_rank)
+        self.logger.info(f"Node {self.rank} connected to peer {peer_rank}. "
                         f"Connected: {len(self.connected_peers)}/{self.expected_connections}")
-            
+
+        # Notify the signaling server that the connection has been established
+        if self.websocket:
             await self.websocket.send(json.dumps({
                 "type": "connection_established",
                 "peerRank": peer_rank,
                 "sessionId": self.session_id,
             }))
 
-            # Notify all peers that this node is ready
-            if len(self.connected_peers) == self.expected_connections:
-                await self.broadcast_node_ready()
+        # If all expected connections are established, broadcast readiness
+        if len(self.connected_peers) == self.expected_connections:
+            await self.broadcast_node_ready()
+
 
     async def connection_worker(self):
         while True:
@@ -282,6 +319,8 @@ class TorusNode:
             pc = self.connections[sender_rank]
             
             if data["type"] == "offer":
+                # Log
+                self.logger.info(f"Received offer from {sender_rank}")
                 if pc.signalingState != "stable":
                     await pc.setLocalDescription(await pc.createAnswer())
                     await pc.setRemoteDescription(RTCSessionDescription(
@@ -448,10 +487,29 @@ class TorusNode:
             data = json.loads(message)
             msg_type = data["type"]
             
+            # if msg_type == "round_update":
+            #     self.peer_rounds[peer_rank] = data["round"]
+            #     if peer_rank in self.rounds_match_events:
+            #         self.rounds_match_events[peer_rank].set()
             if msg_type == "round_update":
-                self.peer_rounds[peer_rank] = data["round"]
-                if peer_rank in self.rounds_match_events:
-                    self.rounds_match_events[peer_rank].set()
+                # The peer is requesting our current round
+                self.logger.info(f"Received round update request from peer {peer_rank}")
+                current_round = self.current_round  # Get the local node's current round
+
+                # Send our current round back to the peer
+                await self.send_to_peer(peer_rank, {
+                    "type": "round_update_response",
+                    "round": current_round
+                })
+            
+            elif msg_type == "round_update_response":
+                # Received a peer's current round
+                peer_round = data.get("round")
+                if peer_round is not None:
+                    self.peer_rounds[peer_rank] = peer_round
+                    self.logger.info(f"Received round update response from peer {peer_rank}: round {peer_round}")
+                else:
+                    self.logger.warning(f"Invalid 'round_update_response' from peer {peer_rank}: {message}")
                     
             elif msg_type == "weights_request":
                 response = {
@@ -472,7 +530,7 @@ class TorusNode:
         except json.JSONDecodeError:
             self.logger.error(f"Failed to parse message from {peer_rank}: {message}")
         except Exception as e:
-            self.logger.error(f"Error handling message from {peer_rank}: {e}")
+            self.logger.error(f"Error handling message from {peer_rank}: {e}, message: {message}")
 
     async def broadcast_node_ready(self):
         if self.websocket:
@@ -491,26 +549,50 @@ class TorusNode:
         self.current_round += 1
         self.logger.info(f"Completed training round {self.current_round}")
 
-    async def wait_until_rounds_match(self, peer_rank: int):
-        while True:
-            if self.peer_rounds[peer_rank] >= self.current_round:
-                break
+    # async def wait_until_rounds_match(self, peer_rank: int):
+    #     while True:
+    #         if self.peer_rounds[peer_rank] >= self.current_round:
+    #             break
                 
-            event = asyncio.Event()
-            self.rounds_match_events[peer_rank] = event
+    #         event = asyncio.Event()
+    #         self.rounds_match_events[peer_rank] = event
             
-            # Request current round from peer
+    #         # Request current round from peer
+    #         await self.send_to_peer(peer_rank, {
+    #             "type": "round_update",
+    #             "round": self.current_round
+    #         })
+            
+    #         try:
+    #             await asyncio.wait_for(event.wait(), timeout=5.0)
+    #         except asyncio.TimeoutError:
+    #             self.logger.warning(f"Timeout waiting for round match with peer {peer_rank}")
+    #         finally:
+    #             self.rounds_match_events.pop(peer_rank, None)
+
+    async def wait_until_rounds_match(self, peer_rank: int, timeout: float = 5.0, check_interval: float = 0.5):
+        """
+        Wait until the peer's round matches or exceeds the local round.
+        Poll the peer's round periodically within the timeout.
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            # Check if the peer's round matches or exceeds the current round
+            if self.peer_rounds.get(peer_rank, 0) >= self.current_round:
+                return  # Synchronization complete
+            
+            # Request the peer's current round
             await self.send_to_peer(peer_rank, {
                 "type": "round_update",
                 "round": self.current_round
             })
             
-            try:
-                await asyncio.wait_for(event.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                self.logger.warning(f"Timeout waiting for round match with peer {peer_rank}")
-            finally:
-                self.rounds_match_events.pop(peer_rank, None)
+            # Sleep for a short interval before checking again
+            await asyncio.sleep(check_interval)
+        
+        # Timeout handling
+        self.logger.warning(f"Timeout waiting for round match with peer {peer_rank}")
+
 
     async def receive(self, node_ids: List[int]) -> List[Any]:
         items = []
