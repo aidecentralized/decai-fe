@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BloodMNIST Browser Trainer</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.training.wasm.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #0066cc;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        button:hover {
+            background-color: #0052a3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #log {
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 4px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .progress {
+            margin-top: 10px;
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 100%;
+            background-color: #0066cc;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BloodMNIST Training</h1>
+        <button id="startButton" onclick="startTraining()">Start Training</button>
+        <div class="progress">
+            <div id="progressBar" class="progress-bar"></div>
+        </div>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        class BloodMNISTTrainer {
+            constructor(modelConfig) {
+                this.modelConfig = modelConfig;
+                this.session = null;
+            }
+
+            async loadModelFile(path) {
+                try {
+                    logMessage(`Attempting to load model file from: ${path}`);
+                    const response = await fetch(path);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const arrayBuffer = await response.arrayBuffer();
+                    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+                        throw new Error('Loaded file is empty or invalid');
+                    }
+                    
+                    logMessage(`Successfully loaded ${path} (${arrayBuffer.byteLength} bytes)`);
+                    return arrayBuffer; // Return the ArrayBuffer directly
+                } catch (error) {
+                    logMessage(`Failed to load ${path}: ${error.message}`, 'error');
+                    throw error;
+                }
+            }
+
+            async initialize() {
+                try {
+                    logMessage('Starting model initialization...');
+                    
+                    // Load model files
+                    const [checkpoint, evalModel, optimizerModel, trainingModel] = await Promise.all([
+                        this.loadModelFile(this.modelConfig.checkpointPath),
+                        this.loadModelFile(this.modelConfig.evalModelPath),
+                        this.loadModelFile(this.modelConfig.optimizerModelPath),
+                        this.loadModelFile(this.modelConfig.trainingModelPath)
+                    ]);
+
+                    logMessage('Creating training session config...');
+                    // const config = {
+                    //     checkpointState: checkpoint,  // Use ArrayBuffer directly
+                    //     evalModel: evalModel,         // Use ArrayBuffer directly
+                    //     optimizerModel: optimizerModel, // Use ArrayBuffer directly
+                    //     trainModel: trainingModel   // Use ArrayBuffer directly
+                    // };
+
+                    const config = {
+                        checkpointState: this.modelConfig.checkpointPath,
+                        evalModel: this.modelConfig.evalModelPath,
+                        optimizerModel: this.modelConfig.optimizerModelPath,
+                        trainModel: this.modelConfig.trainingModelPath
+                    }
+
+                    // Log config details
+                    logMessage('Config created with buffers:');
+                    // Object.entries(config).forEach(([key, value]) => {
+                    //     logMessage(`  ${key}: ${value} bytes`);
+                    // });
+
+                    logMessage('Creating training session...');
+                    
+                    // // Enable debugging for ONNX Runtime
+                    // const options = {
+                    //     debug: true,
+                    //     logLevel: 'verbose'
+                    // };
+                    
+                    // this.session = await ort.TrainingSession.create(config, options);
+                    // logMessage('Training session created successfully');
+                    const response = await fetch(this.modelConfig.checkpointPath);
+                    console.log('Checkpoint response:', response.ok, response.status);
+
+                    // Create training session with the configuration
+                    this.session = await ort.TrainingSession.create(config);
+                    console.log('Training session created successfully');
+                    return true;
+                } catch (error) {
+                    logMessage(`Error initializing model: ${error.message}`, 'error');
+                    if (error.stack) {
+                        logMessage(`Stack trace: ${error.stack}`, 'error');
+                    }
+                    throw error;
+                }
+            }
+
+            async trainBatch(batch) {
+                if (!this.session) {
+                    throw new Error('Training session not initialized');
+                }
+
+                try {
+                    const feeds = {
+                        'input': batch.data,
+                        'labels': batch.labels
+                    };
+
+                    const results = await this.session.runTrainStep(feeds);
+                    // const evalResults = await this.session.eval(feeds);
+                    // const accuracy = this.calculateAccuracy(evalResults.output, batch.labels);
+
+                    // updating UI with metrics
+                    // const loss = parseFloat(results[lossNodeName].data);
+                    // iterationsPerSecond = batchNum / ((Date.now() - epochStartTime) / 1000);
+                    // const message = `TRAINING | Epoch: ${String(epoch + 1).padStart(2)} | Batch ${String(batchNum).padStart(3)} / ${totalNumBatches} | Loss: ${loss.toFixed(4)} | ${iterationsPerSecond.toFixed(2)} it/s`;
+                    // logMessage(message);
+
+                    // update weights then reset gradients
+                    await session.runOptimizerStep();
+                    await session.lazyResetGrad();
+
+                    return { result };
+                } catch (error) {
+                    logMessage(`Error in training batch: ${error.message}`, 'error');
+                    throw error;
+                }
+            }
+
+            calculateAccuracy(output, target) {
+                const predictions = output.data;
+                const labels = target.data;
+                let correct = 0;
+
+                for (let i = 0; i < labels.length; i++) {
+                    const label = Number(labels[i]);
+                    const pred = predictions.slice(i * 8, (i + 1) * 8);
+                    const predictedClass = pred.indexOf(Math.max(...pred));
+                    if (predictedClass === label) correct++;
+                }
+
+                return correct / labels.length;
+            }
+        }
+
+        class BloodMNISTDataLoader {
+            constructor(batchSize = 64) {
+                this.batchSize = batchSize;
+                this.imageSize = 224;
+                this.numChannels = 1;
+            }
+
+            async loadData(jsonUrl) {
+                const response = await fetch(jsonUrl);
+                const jsonData = await response.json();
+                
+                const images = [];
+                const labels = [];
+                
+                Object.values(jsonData).forEach(sample => {
+                    images.push(...sample.image);
+                    labels.push(sample.label);
+                });
+
+                return { images, labels };
+            }
+
+            *createBatches(images, labels) {
+                const numBatches = Math.floor(images.length / (this.batchSize * this.imageSize * this.imageSize));
+                
+                for (let i = 0; i < numBatches; i++) {
+                    const start = i * this.batchSize * this.imageSize * this.imageSize;
+                    const end = start + (this.batchSize * this.imageSize * this.imageSize);
+                    
+                    const batchImages = images.slice(start, end);
+                    const batchLabels = labels.slice(i * this.batchSize, (i + 1) * this.batchSize);
+                    
+                    const normalizedImages = batchImages.map(pixel => 
+                        ((pixel / 255) - 0.1307) / 0.3081
+                    );
+
+                    yield {
+                        data: new ort.Tensor('float32', new Float32Array(normalizedImages), [
+                            this.batchSize, 
+                            this.numChannels,
+                            this.imageSize,
+                            this.imageSize
+                        ]),
+                        labels: new ort.Tensor('int64', new BigInt64Array(batchLabels.map(BigInt)), [this.batchSize])
+                    };
+                }
+            }
+        }
+
+        // function logMessage(message, type = 'info') {
+        //     const log = document.getElementById('log');
+        //     const entry = document.createElement('div');
+        //     entry.className = `log-entry log-${type}`;
+        //     entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        //     log.appendChild(entry);
+        //     log.scrollTop = log.scrollHeight;
+        // }
+
+        function updateProgress(percent) {
+            document.getElementById('progressBar').style.width = `${percent}%`;
+        }
+
+        async function startTraining() {
+            const startButton = document.getElementById('startButton');
+            startButton.disabled = true;
+            
+            try {
+                logMessage('Starting training initialization...');
+                
+                const trainer = new BloodMNISTTrainer({
+                    checkpointPath: 'public/training_artifacts/checkpoint',
+                    evalModelPath: 'public/training_artifacts/eval_model.onnx',
+                    optimizerModelPath: 'public/training_artifacts/optimizer_model.onnx',
+                    trainingModelPath: 'public/training_artifacts/training_model.onnx'
+                });
+
+                await trainer.initialize();
+                
+                logMessage('Loading training data...');
+                const dataLoader = new BloodMNISTDataLoader();
+                const { images, labels } = await dataLoader.loadData('public/data/bloodmnist_train.json');
+
+                batchNum = 0;
+                
+                for (const batch of dataLoader.createBatches(images, labels)) {
+                    // const { loss, accuracy } = await trainer.trainBatch(batch);
+                    // totalLoss += loss;
+                    // batchCount++;
+                    
+                    // const progress = (batchCount / Math.floor(images.length / (64 * 224 * 224))) * 100;
+                    // updateProgress(progress);
+                    
+                    // if (batchCount % 10 === 0) {
+                    //     logMessage(`Batch ${batchCount}: Loss = ${loss.toFixed(4)}, Accuracy = ${(accuracy * 100).toFixed(2)}%`);
+                    // }
+                    ++batchNum;
+                    // create input
+                    const feeds = {
+                        input: batch.data,
+                        labels: batch.labels
+                    }
+
+                    // call train step
+                    logMessage("starting training")
+                    const results = await trainer.session.runTrainStep(feeds);
+                    logMessage("finished training")
+
+                    // updating UI with metrics
+                    // const loss = parseFloat(results[lossNodeName].data);
+                    // setTrainingLosses(losses => losses.concat(loss));
+                    // iterationsPerSecond = batchNum / ((Date.now() - epochStartTime) / 1000);
+                    // const message = `TRAINING | Epoch: ${String(epoch + 1).padStart(2)} | Batch ${String(batchNum).padStart(3)} / ${totalNumBatches} | Loss: ${loss.toFixed(4)} | ${iterationsPerSecond.toFixed(2)} it/s`;
+                    logMessage(`Batch ${batchNum}: Loss = ${loss}`);
+
+                    // update weights then reset gradients
+                    await session.runOptimizerStep();
+                    await session.lazyResetGrad();
+                }
+
+                const averageLoss = totalLoss / batchCount;
+                logMessage(`Training completed. Average loss: ${averageLoss.toFixed(4)}`);
+                
+            } catch (error) {
+                logMessage(`Training failed: ${error.message}`, 'error');
+                if (error.stack) {
+                    logMessage(`Stack trace: ${error.stack}`, 'error');
+                }
+            } finally {
+                startButton.disabled = false;
+            }
+        }
+
+        function logMessage(message, type = 'info') {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+            console.log(`[${type}] ${message}`); // Also log to console for debugging
+        }
+    </script>
+</body>
+</html>
