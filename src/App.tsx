@@ -443,7 +443,7 @@ const App = () => {
         </Alert>
       )}
       <Logo src={mitMediaLabLogo} alt="MIT Media Lab Logo" />
-      <Title>Decentralized AI Demo</Title>
+      <Title>Testing Changes</Title>
       <SubTitle>
         <i>
           Collaborative learning by sharing distilled images, a library for the
